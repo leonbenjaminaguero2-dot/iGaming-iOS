@@ -1,29 +1,23 @@
 name: Build iGaming for iOS
+
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: macos-latest
     env:
       IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID || 'com.example.igaming' }}
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Generate Xcode project
-        run: |
-          brew install xcodegen
-          xcodegen generate --spec project.yml
-      - name: Build iOS Simulator app
-        run: |
-          xcodebuild -project iGaming.xcodeproj -scheme iGaming -configuration Release -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/DerivedData" CODE_SIGNING_ALLOWED=NO build
-          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/DerivedData/Build/Products/Release-iphonesimulator/iGaming.app" "$RUNNER_TEMP/iGaming-Simulator.zip"
-      - name: Upload Simulator build
-        uses: actions/upload-artifact@v4
-        with:
-          name: iGaming-Simulator
-          path: ${{ runner.temp }}/iGaming-Simulator.zip
-          if-no-files-found: error
-          retention-days: 14
-      - name: Detect Apple signing credentials
+      - name: Descargar código
+        uses: actions/checkout@v4
+
+      - name: Detectar credenciales de Apple
+        id: signing
         env:
           P12: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
           PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
@@ -31,72 +25,206 @@ jobs:
           TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
         run: |
           if [[ -n "$P12" && -n "$PROFILE" && -n "$P12_PASSWORD" && -n "$TEAM_ID" ]]; then
-            echo "HAS_IOS_SIGNING=true" >> "$GITHUB_ENV"
+            echo "available=true" >> "$GITHUB_OUTPUT"
           else
-            echo "HAS_IOS_SIGNING=false" >> "$GITHUB_ENV"
+            echo "available=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Install Apple signing files
-        if: env.HAS_IOS_SIGNING == 'true'
+
+      - name: Instalar XcodeGen y generar proyecto
+        id: generate
+        run: |
+          set -euo pipefail
+          brew install xcodegen
+          xcodegen generate --spec project.yml
+
+      - name: Compilar app para simulador
+        id: build-simulator
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project iGaming.xcodeproj \
+            -scheme iGaming \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee "$RUNNER_TEMP/simulator-build.log"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$RUNNER_TEMP/DerivedData/Build/Products/Release-iphonesimulator/iGaming.app" \
+            "$RUNNER_TEMP/iGaming-Simulator.zip"
+
+      - name: Subir app para simulador
+        id: upload-simulator
+        if: steps.build-simulator.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: iGaming-Simulator
+          path: ${{ runner.temp }}/iGaming-Simulator.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Instalar certificado y perfil de Apple
+        id: install-signing
+        if: steps.signing.outputs.available == 'true'
         env:
           P12: ${{ secrets.IOS_CERTIFICATE_P12_BASE64 }}
           PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
           P12_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
         run: |
-          export KEYCHAIN_PATH="$RUNNER_TEMP/igaming.keychain-db"
+          set -euo pipefail
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/igaming.keychain-db"
+
           python3 - <<'PY'
-          import base64, os
+          import base64
+          import os
           from pathlib import Path
-          Path(os.environ["RUNNER_TEMP"], "signing.p12").write_bytes(base64.b64decode(os.environ["P12"]))
-          Path(os.environ["RUNNER_TEMP"], "profile.mobileprovision").write_bytes(base64.b64decode(os.environ["PROFILE"]))
+
+          runner_temp = Path(os.environ["RUNNER_TEMP"])
+          runner_temp.joinpath("signing.p12").write_bytes(
+              base64.b64decode(os.environ["P12"])
+          )
+          runner_temp.joinpath("profile.mobileprovision").write_bytes(
+              base64.b64decode(os.environ["PROFILE"])
+          )
           PY
+
           security create-keychain -p "$P12_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$P12_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH"
           security default-keychain -d user -s "$KEYCHAIN_PATH"
-          security import "$RUNNER_TEMP/signing.p12" -P "$P12_PASSWORD" -A -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$P12_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/signing.p12" \
+            -P "$P12_PASSWORD" \
+            -A \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$P12_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          security cms -D -i "$RUNNER_TEMP/profile.mobileprovision" > "$RUNNER_TEMP/profile.plist"
-          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' "$RUNNER_TEMP/profile.plist")
-          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print Name' "$RUNNER_TEMP/profile.plist")
-          cp "$RUNNER_TEMP/profile.mobileprovision" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+          security cms -D \
+            -i "$RUNNER_TEMP/profile.mobileprovision" \
+            > "$RUNNER_TEMP/profile.plist"
+
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy \
+            -c 'Print UUID' "$RUNNER_TEMP/profile.plist")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy \
+            -c 'Print Name' "$RUNNER_TEMP/profile.plist")
+
+          cp "$RUNNER_TEMP/profile.mobileprovision" \
+            "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+
           echo "PROFILE_NAME=$PROFILE_NAME" >> "$GITHUB_ENV"
-      - name: Archive iGaming
-        if: env.HAS_IOS_SIGNING == 'true'
+
+      - name: Crear archivo firmado para iPhone
+        id: archive
+        if: steps.install-signing.outcome == 'success'
         env:
           TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
         run: |
-          xcodebuild -project iGaming.xcodeproj -scheme iGaming -configuration Release -sdk iphoneos -archivePath "$RUNNER_TEMP/iGaming.xcarchive" CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Apple Development" DEVELOPMENT_TEAM="$TEAM_ID" PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" archive
-      - name: Export signed IPA
-        if: env.HAS_IOS_SIGNING == 'true'
+          set -euo pipefail
+          xcodebuild \
+            -project iGaming.xcodeproj \
+            -scheme iGaming \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/iGaming.xcarchive" \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="Apple Development" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
+            PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" \
+            archive 2>&1 | tee "$RUNNER_TEMP/archive.log"
+
+      - name: Exportar IPA
+        id: export-ipa
+        if: steps.archive.outcome == 'success'
         env:
           TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
         run: |
+          set -euo pipefail
+
           cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-          <key>method</key><string>development</string>
-          <key>teamID</key><string>$TEAM_ID</string>
-          <key>signingStyle</key><string>manual</string>
-          <key>provisioningProfiles</key><dict><key>$IOS_BUNDLE_ID</key><string>$PROFILE_NAME</string></dict>
-          </dict></plist>
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>development</string>
+            <key>teamID</key>
+            <string>$TEAM_ID</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>$IOS_BUNDLE_ID</key>
+              <string>$PROFILE_NAME</string>
+            </dict>
+          </dict>
+          </plist>
           PLIST
-          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/iGaming.xcarchive" -exportPath "$RUNNER_TEMP/ipa" -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
-      - name: Upload iPhone IPA
-        if: env.HAS_IOS_SIGNING == 'true'
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$RUNNER_TEMP/iGaming.xcarchive" \
+            -exportPath "$RUNNER_TEMP/ipa" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            2>&1 | tee "$RUNNER_TEMP/export-ipa.log"
+
+      - name: Subir IPA
+        id: upload-ipa
+        if: steps.export-ipa.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: iGaming-IPA
           path: ${{ runner.temp }}/ipa/*.ipa
           if-no-files-found: error
           retention-days: 14
-      - name: Report result
+
+      - name: Informar resultado
         if: always()
+        env:
+          GENERATE_RESULT: ${{ steps.generate.outcome }}
+          SIMULATOR_RESULT: ${{ steps.build-simulator.outcome }}
+          SIMULATOR_UPLOAD_RESULT: ${{ steps.upload-simulator.outcome }}
+          SIGNING_AVAILABLE: ${{ steps.signing.outputs.available }}
+          SIGNING_INSTALL_RESULT: ${{ steps.install-signing.outcome }}
+          ARCHIVE_RESULT: ${{ steps.archive.outcome }}
+          IPA_EXPORT_RESULT: ${{ steps.export-ipa.outcome }}
+          IPA_UPLOAD_RESULT: ${{ steps.upload-ipa.outcome }}
         run: |
-          if [[ "$HAS_IOS_SIGNING" == "true" ]]; then
-            echo "iGaming-Simulator.zip and the signed iGaming-IPA artifact were created." >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$GENERATE_RESULT" != "success" ]]; then
+            echo "Falló la generación del proyecto Xcode. Revisá el paso “Instalar XcodeGen y generar proyecto”." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$SIMULATOR_RESULT" != "success" ]]; then
+            echo "Falló la compilación para simulador. Últimas líneas del registro:" >> "$GITHUB_STEP_SUMMARY"
+            if [[ -f "$RUNNER_TEMP/simulator-build.log" ]]; then
+              tail -n 100 "$RUNNER_TEMP/simulator-build.log" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          elif [[ "$SIMULATOR_UPLOAD_RESULT" != "success" ]]; then
+            echo "La app se compiló, pero no se pudo subir iGaming-Simulator.zip." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "iGaming-Simulator.zip was created. No Apple signing secrets were found, so an installable IPA was skipped. Add the four IOS_* secrets and IOS_BUNDLE_ID variable to also create the IPA." >> "$GITHUB_STEP_SUMMARY"
+            echo "Se creó y subió el artefacto iGaming-Simulator.zip." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [[ "$SIGNING_AVAILABLE" != "true" ]]; then
+            echo "No se creó un IPA instalable porque faltan credenciales de Apple. Configurá IOS_CERTIFICATE_P12_BASE64, IOS_PROVISIONING_PROFILE_BASE64, IOS_CERTIFICATE_PASSWORD, IOS_TEAM_ID y la variable IOS_BUNDLE_ID." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$SIGNING_INSTALL_RESULT" != "success" ]]; then
+            echo "Falló la instalación del certificado o del perfil de Apple." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$ARCHIVE_RESULT" != "success" ]]; then
+            echo "Falló la creación del archivo firmado para iPhone." >> "$GITHUB_STEP_SUMMARY"
+            if [[ -f "$RUNNER_TEMP/archive.log" ]]; then
+              tail -n 100 "$RUNNER_TEMP/archive.log" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          elif [[ "$IPA_EXPORT_RESULT" != "success" ]]; then
+            echo "Falló la exportación del IPA." >> "$GITHUB_STEP_SUMMARY"
+            if [[ -f "$RUNNER_TEMP/export-ipa.log" ]]; then
+              tail -n 100 "$RUNNER_TEMP/export-ipa.log" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          elif [[ "$IPA_UPLOAD_RESULT" == "success" ]]; then
+            echo "Se creó y subió el artefacto iGaming-IPA." >> "$GITHUB_STEP_SUMMARY"
           fi
