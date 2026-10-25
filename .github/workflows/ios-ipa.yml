@@ -16,6 +16,29 @@ jobs:
       - name: Descargar código
         uses: actions/checkout@v4
 
+      # Corrige el error del log: el argumento "focused" debe ir antes de "value".
+      - name: Corregir argumentos de ToggleRow
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("iGaming/ContentView.swift")
+          source = path.read_text(encoding="utf-8")
+
+          fixes = [
+              ("value: $sync, focused: focus == 0", "focused: focus == 0, value: $sync"),
+              ("value: $notifications, focused: focus == 1", "focused: focus == 1, value: $notifications"),
+          ]
+
+          for old, new in fixes:
+              if old in source:
+                  source = source.replace(old, new)
+              elif new not in source:
+                  raise SystemExit(f"No se encontró el código esperado en {path}: {old}")
+
+          path.write_text(source, encoding="utf-8")
+          PY
+
       - name: Detectar credenciales de Apple
         id: signing
         env:
@@ -73,7 +96,6 @@ jobs:
           P12_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
-
           KEYCHAIN_PATH="$RUNNER_TEMP/igaming.keychain-db"
 
           python3 - <<'PY'
@@ -95,11 +117,13 @@ jobs:
           security unlock-keychain -p "$P12_PASSWORD" "$KEYCHAIN_PATH"
           security list-keychains -d user -s "$KEYCHAIN_PATH"
           security default-keychain -d user -s "$KEYCHAIN_PATH"
+
           security import "$RUNNER_TEMP/signing.p12" \
             -P "$P12_PASSWORD" \
             -A \
             -f pkcs12 \
             -k "$KEYCHAIN_PATH"
+
           security set-key-partition-list \
             -S apple-tool:,apple: \
             -s \
@@ -199,32 +223,25 @@ jobs:
           IPA_UPLOAD_RESULT: ${{ steps.upload-ipa.outcome }}
         run: |
           if [[ "$GENERATE_RESULT" != "success" ]]; then
-            echo "Falló la generación del proyecto Xcode. Revisá el paso “Instalar XcodeGen y generar proyecto”." >> "$GITHUB_STEP_SUMMARY"
+            echo "Falló la generación del proyecto Xcode." >> "$GITHUB_STEP_SUMMARY"
           elif [[ "$SIMULATOR_RESULT" != "success" ]]; then
-            echo "Falló la compilación para simulador. Últimas líneas del registro:" >> "$GITHUB_STEP_SUMMARY"
+            echo "Falló la compilación para simulador. Errores y advertencias:" >> "$GITHUB_STEP_SUMMARY"
             if [[ -f "$RUNNER_TEMP/simulator-build.log" ]]; then
-              tail -n 100 "$RUNNER_TEMP/simulator-build.log" >> "$GITHUB_STEP_SUMMARY"
+              grep -E 'error:|warning:|BUILD FAILED|The following build commands failed' \
+                "$RUNNER_TEMP/simulator-build.log" | tail -n 40 >> "$GITHUB_STEP_SUMMARY" || true
             fi
-          elif [[ "$SIMULATOR_UPLOAD_RESULT" != "success" ]]; then
-            echo "La app se compiló, pero no se pudo subir iGaming-Simulator.zip." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Se creó y subió el artefacto iGaming-Simulator.zip." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$SIMULATOR_UPLOAD_RESULT" == "success" ]]; then
+            echo "Se creó y subió iGaming-Simulator.zip." >> "$GITHUB_STEP_SUMMARY"
           fi
 
           if [[ "$SIGNING_AVAILABLE" != "true" ]]; then
-            echo "No se creó un IPA instalable porque faltan credenciales de Apple. Configurá IOS_CERTIFICATE_P12_BASE64, IOS_PROVISIONING_PROFILE_BASE64, IOS_CERTIFICATE_PASSWORD, IOS_TEAM_ID y la variable IOS_BUNDLE_ID." >> "$GITHUB_STEP_SUMMARY"
+            echo "No se creó un IPA instalable porque faltan las credenciales de Apple. Configurá IOS_CERTIFICATE_P12_BASE64, IOS_PROVISIONING_PROFILE_BASE64, IOS_CERTIFICATE_PASSWORD, IOS_TEAM_ID y la variable IOS_BUNDLE_ID." >> "$GITHUB_STEP_SUMMARY"
           elif [[ "$SIGNING_INSTALL_RESULT" != "success" ]]; then
             echo "Falló la instalación del certificado o del perfil de Apple." >> "$GITHUB_STEP_SUMMARY"
           elif [[ "$ARCHIVE_RESULT" != "success" ]]; then
             echo "Falló la creación del archivo firmado para iPhone." >> "$GITHUB_STEP_SUMMARY"
-            if [[ -f "$RUNNER_TEMP/archive.log" ]]; then
-              tail -n 100 "$RUNNER_TEMP/archive.log" >> "$GITHUB_STEP_SUMMARY"
-            fi
           elif [[ "$IPA_EXPORT_RESULT" != "success" ]]; then
             echo "Falló la exportación del IPA." >> "$GITHUB_STEP_SUMMARY"
-            if [[ -f "$RUNNER_TEMP/export-ipa.log" ]]; then
-              tail -n 100 "$RUNNER_TEMP/export-ipa.log" >> "$GITHUB_STEP_SUMMARY"
-            fi
           elif [[ "$IPA_UPLOAD_RESULT" == "success" ]]; then
-            echo "Se creó y subió el artefacto iGaming-IPA." >> "$GITHUB_STEP_SUMMARY"
+            echo "Se creó y subió iGaming-IPA." >> "$GITHUB_STEP_SUMMARY"
           fi
