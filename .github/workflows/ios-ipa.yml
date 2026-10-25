@@ -16,14 +16,13 @@ jobs:
       - name: Descargar código
         uses: actions/checkout@v4
 
-      # Corrige el error del log: el argumento "focused" debe ir antes de "value".
-      - name: Corregir argumentos de ToggleRow
+      - name: Corregir configuración de compilación
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path("iGaming/ContentView.swift")
-          source = path.read_text(encoding="utf-8")
+          source_path = Path("iGaming/ContentView.swift")
+          source = source_path.read_text(encoding="utf-8")
 
           fixes = [
               ("value: $sync, focused: focus == 0", "focused: focus == 0, value: $sync"),
@@ -34,9 +33,23 @@ jobs:
               if old in source:
                   source = source.replace(old, new)
               elif new not in source:
-                  raise SystemExit(f"No se encontró el código esperado en {path}: {old}")
+                  raise SystemExit(f"No se encontró el código esperado en {source_path}: {old}")
 
-          path.write_text(source, encoding="utf-8")
+          source_path.write_text(source, encoding="utf-8")
+
+          project_path = Path("project.yml")
+          project = project_path.read_text(encoding="utf-8")
+
+          if "GENERATE_INFOPLIST_FILE:" not in project:
+              anchor = "        PRODUCT_NAME: iGaming\n"
+              if anchor not in project:
+                  raise SystemExit(f"No se encontró la configuración esperada en {project_path}")
+              project = project.replace(
+                  anchor,
+                  anchor + "        GENERATE_INFOPLIST_FILE: YES\n",
+                  1
+              )
+              project_path.write_text(project, encoding="utf-8")
           PY
 
       - name: Detectar credenciales de Apple
@@ -70,6 +83,7 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            GENERATE_INFOPLIST_FILE=YES \
             CODE_SIGNING_ALLOWED=NO \
             build 2>&1 | tee "$RUNNER_TEMP/simulator-build.log"
 
@@ -158,6 +172,7 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/iGaming.xcarchive" \
+            GENERATE_INFOPLIST_FILE=YES \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="Apple Development" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
@@ -235,12 +250,12 @@ jobs:
           fi
 
           if [[ "$SIGNING_AVAILABLE" != "true" ]]; then
-            echo "No se creó un IPA instalable porque faltan las credenciales de Apple. Configurá IOS_CERTIFICATE_P12_BASE64, IOS_PROVISIONING_PROFILE_BASE64, IOS_CERTIFICATE_PASSWORD, IOS_TEAM_ID y la variable IOS_BUNDLE_ID." >> "$GITHUB_STEP_SUMMARY"
-          elif [[ "$SIGNING_INSTALL_RESULT" != "success" ]]; then
+            echo "No se creó un IPA instalable porque faltan las credenciales de Apple: IOS_CERTIFICATE_P12_BASE64, IOS_PROVISIONING_PROFILE_BASE64, IOS_CERTIFICATE_PASSWORD, IOS_TEAM_ID y la variable IOS_BUNDLE_ID." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$SIMULATOR_RESULT" == "success" && "$SIGNING_INSTALL_RESULT" != "success" ]]; then
             echo "Falló la instalación del certificado o del perfil de Apple." >> "$GITHUB_STEP_SUMMARY"
-          elif [[ "$ARCHIVE_RESULT" != "success" ]]; then
+          elif [[ "$ARCHIVE_RESULT" != "success" && "$ARCHIVE_RESULT" != "skipped" ]]; then
             echo "Falló la creación del archivo firmado para iPhone." >> "$GITHUB_STEP_SUMMARY"
-          elif [[ "$IPA_EXPORT_RESULT" != "success" ]]; then
+          elif [[ "$IPA_EXPORT_RESULT" != "success" && "$IPA_EXPORT_RESULT" != "skipped" ]]; then
             echo "Falló la exportación del IPA." >> "$GITHUB_STEP_SUMMARY"
           elif [[ "$IPA_UPLOAD_RESULT" == "success" ]]; then
             echo "Se creó y subió iGaming-IPA." >> "$GITHUB_STEP_SUMMARY"
