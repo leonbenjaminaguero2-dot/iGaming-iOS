@@ -1,0 +1,37 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+ <defs>
+  <linearGradient id="bg" x1=".08" y1="0" x2=".92" y2="1"><stop stop-color="#14213d"/><stop offset="1" stop-color="#070a13"/></linearGradient>
+  <radialGradient id="glow"><stop stop-color="#418cff" stop-opacity=".3"/><stop offset="1" stop-color="#418cff" stop-opacity="0"/></radialGradient>
+  <linearGradient id="shell" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e5f2ff"/><stop offset=".42" stop-color="#9fcaff"/><stop offset="1" stop-color="#658df5"/></linearGradient>
+  <linearGradient id="grip" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#b9d8ff"/><stop offset="1" stop-color="#799ef1"/></linearGradient>
+  <filter id="shadow" x="-25%" y="-25%" width="150%" height="160%"><feGaussianBlur in="SourceAlpha" stdDeviation="24"/><feOffset dy="22"/><feComponentTransfer><feFuncA type="linear" slope=".42"/></feComponentTransfer><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+ </defs>
+ <rect width="1024" height="1024" rx="220" fill="url(#bg)"/>
+ <circle cx="512" cy="498" r="450" fill="url(#glow)"/>
+ <!-- shoulder triggers -->
+ <path d="M267 333c16-82 67-124 143-124h68v88H320c-20 0-37 13-44 36zM757 333c-16-82-67-124-143-124h-68v88h158c20 0 37 13 44 36z" fill="#799ef1" stroke="#dcecff" stroke-opacity=".7" stroke-width="12" stroke-linejoin="round"/>
+ <!-- unmistakable controller shell -->
+ <path d="M320 294c-112 0-182 70-211 181L56 683c-25 103 39 166 121 101l158-125h310l158 125c82 65 146 2 121-101l-53-208c-29-111-99-181-211-181H320z" fill="url(#shell)" stroke="#eff7ff" stroke-width="13" filter="url(#shadow)"/>
+ <!-- grips -->
+ <path d="M111 676l38-143M913 676l-38-143" stroke="url(#grip)" stroke-width="27" stroke-linecap="round" opacity=".65"/>
+ <!-- d-pad -->
+ <path d="M207 451h52v-52h61v52h52v61h-52v52h-61v-52h-52z" fill="#17233b"/>
+ <path d="M267 410v143M226 481h143" stroke="#31466d" stroke-width="5" stroke-linecap="round"/>
+ <!-- four face buttons -->
+ <circle cx="745" cy="442" r="30" fill="#c8f169"/><circle cx="810" cy="507" r="30" fill="#17233b"/>
+ <circle cx="680" cy="507" r="30" fill="#eef6ff"/><circle cx="745" cy="572" r="30" fill="#17233b"/>
+ <circle cx="745" cy="442" r="11" fill="#efffaa"/><circle cx="810" cy="507" r="11" fill="#7188bd"/>
+ <circle cx="680" cy="507" r="11" fill="#ffffff"/><circle cx="745" cy="572" r="11" fill="#7188bd"/>
+ <!-- twin analog sticks -->
+ <circle cx="390" cy="572" r="62" fill="#17233b" stroke="#d9eaff" stroke-width="10"/>
+ <circle cx="390" cy="572" r="37" fill="#263b62" stroke="#789fe9" stroke-width="7"/>
+ <circle cx="600" cy="572" r="62" fill="#17233b" stroke="#d9eaff" stroke-width="10"/>
+ <circle cx="600" cy="572" r="37" fill="#263b62" stroke="#789fe9" stroke-width="7"/>
+ <!-- center touchpad and system buttons -->
+ <rect x="418" y="376" width="188" height="58" rx="22" fill="#22365b" stroke="#cadfff" stroke-width="7"/>
+ <path d="M439 397h146" stroke="#7eaaf4" stroke-width="5" stroke-linecap="round" opacity=".75"/>
+ <rect x="478" y="463" width="68" height="18" rx="9" fill="#203253"/>
+ <circle cx="454" cy="472" r="9" fill="#bde2ff"/><circle cx="570" cy="472" r="9" fill="#bde2ff"/>
+ <!-- iGaming signature light -->
+ <circle cx="512" cy="657" r="9" fill="#c8f169"/>
+</svg>
